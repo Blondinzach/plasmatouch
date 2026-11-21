@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#20252b">
+<title>PlasmaTouch CNC</title>
+<style>
+:root{--bg:#20252b;--panel:#2b323a;--panel2:#343d47;--line:#56616d;--text:#e8edf2;--muted:#aab4bf;--blue:#2e91d1;--orange:#e5a33b}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:14px Arial,Helvetica,sans-serif}
+header{height:46px;background:#171b20;border-bottom:1px solid #080a0c;display:flex;align-items:center;gap:16px;padding:0 12px;white-space:nowrap}
+.brand{font-weight:bold;color:#fff;font-size:16px}.menu{color:#c7d0d9}
+.toolbar{height:48px;background:var(--panel);border-bottom:1px solid #111820;display:flex;align-items:center;gap:6px;padding:5px;overflow-x:auto}
+button,.filebtn{border:1px solid #111820;background:linear-gradient(#48535e,#343d46);color:#f2f5f8;border-radius:4px;padding:8px 11px;font-weight:bold;white-space:nowrap;min-height:34px}
+button:active,.filebtn:active{background:#1f75aa}button.active{background:#176c9e;border-color:#62b8ec}
+.workspace{height:calc(100% - 94px);display:flex;flex-direction:column}
+.canvaswrap{position:relative;flex:1;min-height:0;background:#101820}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+.sidepanel{position:absolute;top:10px;left:10px;background:#252d35eF;border:1px solid #596572;border-radius:5px;padding:9px;min-width:148px;box-shadow:0 3px 12px #0008}
+.sidepanel strong{display:block;margin-bottom:7px;color:#fff}.sidepanel small{color:#c3ccd5;line-height:1.5}
+.commandbar{display:flex;gap:7px;align-items:center;padding:8px;background:#252c33;border-top:1px solid #0c1116}
+.commandbar input{min-width:0;flex:1;background:#10161c;color:#fff;border:1px solid #687583;border-radius:4px;padding:11px;font-size:16px}
+.status{height:24px;background:#151a1f;color:#aab5c0;padding:5px 9px;font-size:11px;display:flex;justify-content:space-between}
+.modal{position:absolute;inset:0;background:#0009;display:none;align-items:center;justify-content:center;padding:18px}
+.dialog{width:min(420px,100%);background:#2b333c;border:1px solid #71808e;border-radius:7px;padding:16px;box-shadow:0 8px 30px #000b}
+.dialog h3{margin:0 0 12px}.dialog input{width:100%;padding:12px;background:#111820;color:#fff;border:1px solid #697887;border-radius:4px;font-size:17px;margin:5px 0 12px}
+.dialog .actions{display:flex;gap:8px;justify-content:flex-end}
+@media(min-width:800px){header{height:52px}.toolbar{height:54px}.workspace{height:calc(100% - 106px)}}
+</style>
+</head>
+<body>
+<header><span class="brand">PLASMATOUCH CNC</span><span class="menu">File</span><span class="menu">Edit</span><span class="menu">Draw</span><span class="menu">View</span><span class="menu">Help</span></header>
+<div class="toolbar">
+<button id="selectBtn" class="active">Select</button><button id="lineBtn">Line</button><button id="circleBtn">Circle</button><button id="deleteBtn">Delete</button><button id="zoomIn">Zoom +</button><button id="zoomOut">Zoom −</button><button id="fitBtn">Fit</button><button id="openBtn">Open DXF</button><button id="saveBtn">Export DXF</button>
+<input id="fileInput" type="file" accept=".dxf,.txt" hidden>
+</div>
+<div class="workspace">
+<div class="canvaswrap" id="canvasWrap">
+<canvas id="cad"></canvas>
+<div class="sidepanel"><strong>Drawing area</strong><small>Units: INCHES<br>Grid: 1.00 in<br>Origin: lower-left<br><span id="coord">X 0.00  Y 0.00</span></small></div>
+<div class="modal" id="modal"><div class="dialog"><h3 id="modalTitle">Line command</h3><label id="modalLabel">Enter: L,degree,length</label><input id="modalInput" autocomplete="off" placeholder="L,90,5"><div class="actions"><button id="cancelModal">Cancel</button><button id="applyModal" class="active">Draw</button></div></div></div>
+</div>
+<div class="commandbar"><input id="command" placeholder="Command: L,90,5  or  C,5" autocomplete="off"><button id="runCommand" class="active">Enter</button></div>
+<div class="status"><span id="statusText">Ready — select a tool or enter a command</span><span id="zoomText">100%</span></div>
+</div>
+<script>
+(()=>{
+const canvas=document.getElementById('cad'),ctx=canvas.getContext('2d'),wrap=document.getElementById('canvasWrap');
+let shapes=[],tool='select',scale=24,ox=0,oy=0,selected=-1,drawingStart=null,lastPointer=null;
+const $=id=>document.getElementById(id);
+function resize(){const r=wrap.getBoundingClientRect(),d=window.devicePixelRatio||1;canvas.width=Math.max(1,Math.floor(r.width*d));canvas.height=Math.max(1,Math.floor(r.height*d));ctx.setTransform(d,0,0,d,0,0);if(!ox&&!oy){ox=r.width/2;oy=r.height/2}draw()}
+function world(x,y){return {x:(x-ox)/scale,y:(oy-y)/scale}}
+function screen(p){return {x:ox+p.x*scale,y:oy-p.y*scale}}
+function draw(){const w=canvas.clientWidth,h=canvas.clientHeight;ctx.clearRect(0,0,w,h);ctx.fillStyle='#101820';ctx.fillRect(0,0,w,h);
+const step=scale; if(step>7){ctx.strokeStyle='#26323d';ctx.lineWidth=1;ctx.beginPath();for(let x=((ox%step)+step)%step;x<w;x+=step){ctx.moveTo(x,0);ctx.lineTo(x,h)}for(let y=((oy%step)+step)%step;y<h;y+=step){ctx.moveTo(0,y);ctx.lineTo(w,y)}ctx.stroke()}
+ctx.strokeStyle='#53616e';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(ox,0);ctx.lineTo(ox,h);ctx.moveTo(0,oy);ctx.lineTo(w,oy);ctx.stroke();
+shapes.forEach((s,i)=>{ctx.strokeStyle=i===selected?'#ffb347':'#e8edf2';ctx.lineWidth=i===selected?3:2;ctx.beginPath();if(s.type==='line'){let a=screen(s.a),b=screen(s.b);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y)}else{let c=screen(s.c);ctx.arc(c.x,c.y,s.r*scale,0,Math.PI*2)}ctx.stroke()});
+$('zoomText').textContent=Math.round(scale/24*100)+'%'}
+function setStatus(t){$('statusText').textContent=t}
+function setTool(t){tool=t;drawingStart=null;['selectBtn','lineBtn','circleBtn'].forEach(id=>$(id).classList.remove('active'));$(t==='select'?'selectBtn':t==='line'?'lineBtn':'circleBtn').classList.add('active');setStatus(t==='select'?'Select mode':t==='line'?'Line tool: tap start and end':'Circle tool: tap center, then radius')}
+function addLine(a,b){if(Math.hypot(b.x-a.x,b.y-a.y)<.001)return;shapes.push({type:'line',a,b});selected=shapes.length-1;draw()}
+function addCircle(c,r){if(r<=0)return;shapes.push({type:'circle',c,r});selected=shapes.length-1;draw()}
+function command(s){s=s.trim().toUpperCase();if(!s)return;let p=s.split(',').map(x=>x.trim());if(p[0]==='L'&&p.length>=3){let deg=Number(p[1]),len=Number(p[2]);if(!Number.isFinite(deg)||!Number.isFinite(len)||len<=0){setStatus('Use L,degree,length — example L,90,5');return}let a=shapes.length?lastEnd():{x:0,y:0};let rad=deg*Math.PI/180;addLine(a,{x:a.x+Math.cos(rad)*len,y:a.y+Math.sin(rad)*len});setStatus(`Line added: ${len} in at ${deg}°`)}else if(p[0]==='C'&&p.length>=2){let r=Number(p[1]);if(!Number.isFinite(r)||r<=0){setStatus('Use C,radius — example C,5');return}addCircle({x:0,y:0},r);setStatus(`Circle added: radius ${r} in`)}else{setStatus('Commands: L,degree,length or C,radius')}}
+function lastEnd(){for(let i=shapes.length-1;i>=0;i--)if(shapes[i].type==='line')return {...shapes[i].b};return {x:0,y:0}}
+function fit(){if(!shapes.length){scale=24;ox=canvas.clientWidth/2;oy=canvas.clientHeight/2;draw();return}let xs=[],ys=[];shapes.forEach(s=>{if(s.type==='line'){xs.push(s.a.x,s.b.x);ys.push(s.a.y,s.b.y)}else{xs.push(s.c.x-s.r,s.c.x+s.r);ys.push(s.c.y-s.r,s.c.y+s.r)}});let minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys),pad=50;scale=Math.max(3,Math.min((canvas.clientWidth-pad*2)/Math.max(maxx-minx,.1),(canvas.clientHeight-pad*2)/Math.max(maxy-miny,.1)));ox=canvas.clientWidth/2-(minx+maxx)/2*scale;oy=canvas.clientHeight/2+(miny+maxy)/2*scale;draw()}
+function exportDxf(){let out=['0','SECTION','2','HEADER','9','$INSUNITS','70','1','0','ENDSEC','0','SECTION','2','ENTITIES'];shapes.forEach(s=>{if(s.type==='line')out.push('0','LINE','8','0','10',s.a.x,'20',s.a.y,'30','0','11',s.b.x,'21',s.b.y,'31','0');else out.push('0','CIRCLE','8','0','10',s.c.x,'20',s.c.y,'30','0','40',s.r)});out.push('0','ENDSEC','0','EOF');let blob=new Blob([out.join('\r\n')],{type:'application/dxf'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='plasmatouch-drawing.dxf';a.click();URL.revokeObjectURL(url);setStatus('DXF exported')}
+function importDxf(file){let reader=new FileReader();reader.onload=()=>{try{let t=reader.result.split(/\r?\n/),pairs=[];for(let i=0;i<t.length-1;i+=2)pairs.push([t[i].trim(),t[i+1].trim()]);for(let i=0;i<pairs.length;i++){if(pairs[i][0]!=='0')continue;let type=pairs[i][1],v={};for(let j=i+1;j<pairs.length&&pairs[j][0]!=='0';j++)v[pairs[j][0]]=pairs[j][1];if(type==='LINE'&&v['10']!==undefined&&v['11']!==undefined)shapes.push({type:'line',a:{x:+v['10'],y:+v['20']},b:{x:+v['11'],y:+v['21']}});if(type==='CIRCLE'&&v['40']!==undefined)shapes.push({type:'circle',c:{x:+v['10'],y:+v['20']},r:+v['40']})}fit();setStatus('DXF imported')}catch(e){setStatus('Could not read this DXF file')}};reader.readAsText(file)}
+canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);let r=canvas.getBoundingClientRect(),p=world(e.clientX-r.left,e.clientY-r.top);lastPointer={x:e.clientX,y:e.clientY};if(tool==='line'||tool==='circle'){if(!drawingStart){drawingStart=p;setStatus(tool==='line'?'Tap line endpoint':'Tap circle edge to set radius')}else{if(tool==='line')addLine(drawingStart,p);else addCircle(drawingStart,Math.hypot(p.x-drawingStart.x,p.y-drawingStart.y));drawingStart=null;setStatus('Shape added')}}else{let hit=-1;for(let i=shapes.length-1;i>=0;i--){let s=shapes[i],d=s.type==='line'?distanceToSegment(p,s.a,s.b):Math.abs(Math.hypot(p.x-s.c.x,p.y-s.c.y)-s.r);if(d<(s.type==='line'?.25:Math.max(.2,s.r*.08))){hit=i;break}}selected=hit;draw()}});
+canvas.addEventListener('pointermove',e=>{let r=canvas.getBoundingClientRect(),p=world(e.clientX-r.left,e.clientY-r.top);$('coord').textContent=`X ${p.x.toFixed(2)}  Y ${p.y.toFixed(2)}`});
+function distanceToSegment(p,a,b){let dx=b.x-a.x,dy=b.y-a.y,t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy||1)));return Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy)}
+$('selectBtn').onclick=()=>setTool('select');$('lineBtn').onclick=()=>setTool('line');$('circleBtn').onclick=()=>setTool('circle');
+$('deleteBtn').onclick=()=>{if(selected>=0){shapes.splice(selected,1);selected=-1;draw();setStatus('Selected shape deleted')}else setStatus('Select a shape first')};
+$('zoomIn').onclick=()=>{scale*=1.25;draw()};$('zoomOut').onclick=()=>{scale/=1.25;draw()};$('fitBtn').onclick=fit;$('saveBtn').onclick=exportDxf;
+$('openBtn').onclick=()=>$('fileInput').click();$('fileInput').onchange=e=>{if(e.target.files[0])importDxf(e.target.files[0]);e.target.value=''};
+$('runCommand').onclick=()=>{command($('command').value);$('command').value=''};$('command').addEventListener('keydown',e=>{if(e.key==='Enter')$('runCommand').click()});
+$('cancelModal').onclick=()=>$('modal').style.display='none';$('applyModal').onclick=()=>{$('modal').style.display='none';command($('modalInput').value)};
+window.addEventListener('resize',resize);resize();fit();
+})();
+</script>
+</body></html>
